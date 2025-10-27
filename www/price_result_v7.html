@@ -54,7 +54,7 @@
       </div>
     </div>
 
-    <div id="cfgWarn" class="warn">Nepodařilo se načíst config/config.json – používám výchozí ceník ve stráneeeece.</div>
+    <div id="cfgWarn" class="warn">Nepodařilo se načíst config/config.json – používám výchozí ceník ve stránce.</div>
 
     <div style="margin-top:10px">
       <span class="pill">Zvolte režim podpory</span>
@@ -124,7 +124,7 @@
 <script>
 let CONFIG=null;
 
-// 1) načtení configu (unit ceny, grants, model) – RELATIVNÍ cesta kvůli GitHub Pages
+// 1) Načtení configu – RELATIVNÍ cesta (funguje i na GitHub Pages)
 async function loadConfig(){
   try{
     const r = await fetch('config/config.json',{cache:'no-store'});
@@ -135,7 +135,7 @@ async function loadConfig(){
   }
 }
 
-// 2) defaults + merge
+// 2) Defaults + merge
 function getUnit(){
   const def={
     panel:1800,rack:850,laborPerPanel:1100,inverter:25000,bms:8500,acdc:17000,rev:15000,stop:2500,misc:10000,
@@ -146,16 +146,15 @@ function getUnit(){
   return {...def, ...CONFIG.unit};
 }
 
-const def = {
-  seasonShares: {zima:0.10,jaro:0.25,leto:0.45,podzim:0.20},
-  selfConsumption: {zima:0.95,jaro:0.75,leto:0.55,podzim:0.70},
-  panelDegradation: 0.004,
-  defaultBuyPrice: 1.00,
-  billVariableShare: 0.75,   // jen ~75 % účtu je ovlivnitelné úsporou
-  maxSelfCoverage: 0.85      // ani s baterií nepokryjeme 100 % roční spotřeby
-};
-
-
+function getModel(){
+  const def = {
+    seasonShares: {zima:0.10,jaro:0.25,leto:0.45,podzim:0.20},
+    selfConsumption: {zima:0.95,jaro:0.75,leto:0.55,podzim:0.70},
+    panelDegradation: 0.004,
+    defaultBuyPrice: 1.00,
+    billVariableShare: 0.75,   // jen ~75 % účtu je variabilní
+    maxSelfCoverage: 0.85      // ani s baterií nepokryjeme 100 % spotřeby
+  };
   if(!CONFIG || !CONFIG.model) return def;
   const m = {...def, ...CONFIG.model};
   const s = m.seasonShares;
@@ -174,6 +173,7 @@ const def = {
 function fmt(x){ return (x||0).toLocaleString('cs-CZ'); }
 function parseNum(q){ const v=parseFloat(q); return isNaN(v)?0:v; }
 
+// Jednoduchý interní kalkul ceníku
 function internalPriceDynamic(kwp,batt_kwh){
   const U=getUnit();
   const panels=Math.ceil(kwp/(U.panelWp/1000));
@@ -197,11 +197,13 @@ function drawChart(labels, series){
 
 /**
  * Sezónní úspora:
- * - vlastní spotřeba je po sezónách limitována podílem reálné roční spotřeby (cons * seasonShare)
+ * - vlastní spotřeba je po sezónách limitována spotřebou v sezóně
+ * - roční vlastní spotřeba je navíc omezená na maxSelfCoverage * roční spotřeba
  * - přetoky dávají příjem jen pokud má klient sjednaný výkup
  * - degradace panelů v čase
+ * - úspora se počítá přes variabilní složku ceny (fixní poplatky FVE nesmaže)
  */
-  function seasonalSaving(prodYear, consYear, avgPriceVar, buyPrice, hasExport, yearIdx){
+function seasonalSaving(prodYear, consYear, avgPriceVar, buyPrice, hasExport, yearIdx){
   const M = getModel();
   const seasons = [
     {key:'zima',  share: M.seasonShares.zima,  sc: M.selfConsumption.zima},
@@ -209,18 +211,14 @@ function drawChart(labels, series){
     {key:'leto',  share: M.seasonShares.leto,  sc: M.selfConsumption.leto},
     {key:'podzim',share: M.seasonShares.podzim,sc: M.selfConsumption.podzim},
   ];
-
   const deg = Math.pow(1 - (M.panelDegradation||0), yearIdx);
-
-  // roční strop vlastní spotřeby (napříč sezónami)
   let remainingSelfCapKWh = Math.max(0, consYear) * Math.max(0, Math.min(1, M.maxSelfCoverage || 0.85));
 
   let totalCZK = 0;
   for (const s of seasons){
-    const prod   = prodYear * s.share * deg;        // výroba v sezóně
-    const selfRaw= prod * s.sc;                      // teoretická vlastní spotřeba z výroby
-    const consSeasonCap = (consYear * s.share);      // spotřeba v té sezóně
-    // kolik můžeme opravdu započíst jako vlastní spotřebu
+    const prod   = prodYear * s.share * deg;
+    const selfRaw= prod * s.sc;
+    const consSeasonCap = Math.max(0, consYear * s.share);
     const selfKWh = Math.max(0, Math.min(selfRaw, consSeasonCap, remainingSelfCapKWh));
     remainingSelfCapKWh -= selfKWh;
 
@@ -232,43 +230,19 @@ function drawChart(labels, series){
   return totalCZK;
 }
 
-  const M = getModel();
-  const seasons = [
-    {key:'zima',  share: M.seasonShares.zima,  sc: M.selfConsumption.zima},
-    {key:'jaro',  share: M.seasonShares.jaro,  sc: M.selfConsumption.jaro},
-    {key:'leto',  share: M.selfConsumption.leto?M.seasonShares.leto:0,  sc: M.selfConsumption.leto},
-    {key:'podzim',share: M.seasonShares.podzim,sc: M.selfConsumption.podzim},
-  ];
-  const deg = Math.pow(1 - (M.panelDegradation||0), yearIdx);
-  let total=0;
-
-  for (const s of seasons){
-    const prod    = prodYear * s.share * deg;           // výroba v dané sezóně
-    const selfRaw = prod * s.sc;                         // „teoretická“ vlastní spotřeba
-    const consCap = Math.max(0, consYear * s.share);     // kolik dává smysl pokrýt ze SPOTŘEBY v sezóně
-    const self    = Math.min(selfRaw, consCap);          // NIKDY víc než reálná spotřeba v sezóně
-    const exportE = Math.max(0, prod - self);
-    const exportIncome = hasExport ? (exportE * buyPrice) : 0;
-    total += self*avgPrice + exportIncome;
-  }
-  return total;
-}
-
+// Dotace – načtení do UI
 function hydrateGrants(){
   const wrap = document.getElementById('subsidyWrap');
   if(!wrap) return;
-
   const grants = (CONFIG && Array.isArray(CONFIG.grants) && CONFIG.grants.length)
     ? CONFIG.grants.slice()
     : [
         {name:'Dotace s chytrým řízením', amount:140000},
         {name:'Dotace bez chytrého řízení', amount:100000},
       ];
-
   if (!grants.some(g => Number(g.amount||0)===0)){
     grants.push({name:'Nechci čerpat dotaci', amount:0});
   }
-
   wrap.innerHTML = '';
   grants.forEach(g=>{
     const cap = Number(g.amount||0);
@@ -297,7 +271,9 @@ async function main(){
         yieldK=q.get('yield')||"1150", wbQS=(q.get('wb')==="1");
 
   const avgPrice = (cons>0 && paid>0) ? (paid/cons) : 0;
+  const M = getModel();
   const avgPriceVar = avgPrice * (M.billVariableShare || 0.75);
+
   document.getElementById("avgPrice").textContent = (avgPrice>0 && isFinite(avgPrice)) ? avgPrice.toFixed(2)+" Kč/kWh" : "—";
   document.getElementById("config").textContent=`${kwp.toFixed(1)} kWp + ${batt.toFixed(2)} kWh`;
 
@@ -313,7 +289,6 @@ async function main(){
   const hasExportEl=document.getElementById("hasExport");
   wbEl.checked=wbQS;
 
-  const M = getModel();
   if (typeof M.defaultBuyPrice === 'number') {
     buyEl.value = Number(M.defaultBuyPrice).toFixed(2);
   }
@@ -321,14 +296,12 @@ async function main(){
   function bindGrantCards(){
     const cards=[...document.querySelectorAll(".sub-card")];
     const capRadios=[...document.querySelectorAll("input[name=cap]")];
-
     function grantAmount(){
       const chk = capRadios.find(r=>r.checked);
       const cap = chk ? Number(chk.value||0) : 0;
       const raw=10000*(kwp+batt)+(wbEl.checked?U.wallboxGrant:0);
       return Math.min(raw,cap);
     }
-
     cards.forEach((c)=>{
       c.addEventListener("click",()=>{ 
         capRadios.forEach(r=>r.checked=false);
@@ -338,9 +311,7 @@ async function main(){
       });
       c.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); c.click(); } });
     });
-
     window._grantAmount = grantAmount;
-
     if (capRadios[0]){ capRadios[0].checked = true; cards[0].classList.add('active'); }
   }
 
@@ -361,23 +332,15 @@ async function main(){
     const cum=[];
     let cumVal=-post, first=0;
 
-    const cap = (paid>0 && isFinite(paid)) ? paid : Infinity; // robustní strop
+    // strop „šetřitelné“ části účtu (variabilní složka)
+    const capVarCZK = (paid>0 && isFinite(paid)) ? paid * (M.billVariableShare || 0.75) : Infinity;
 
-  const yrs=[...Array(20)].map((_,i)=>i+1);
-const buy=parseNum(buyEl.value||'1');
-const hasExport = hasExportEl.checked;
-const cum=[];
-let cumVal=-post, first=0;
-
-// strop úspor v Kč podle variabilní části účtu
-const capVarCZK = (paid>0 && isFinite(paid)) ? paid * (M.billVariableShare || 0.75) : Infinity;
-
-yrs.forEach((Y,idx)=>{
-  const yearSaveRaw = seasonalSaving(annualProd, cons, avgPriceVar, buy, hasExport, idx);
-  const yearSave = Math.min(yearSaveRaw, capVarCZK); // NIKDY nešetříme víc než variabilní část účtu
-  cumVal += yearSave;
-  cum.push(Math.round(cumVal));
-  if(Y===1) first = yearSave;
+    yrs.forEach((Y,idx)=>{
+      const yearSaveRaw = seasonalSaving(annualProd, cons, avgPriceVar, buy, hasExport, idx);
+      const yearSave = Math.min(yearSaveRaw, capVarCZK); // nikdy nešetříme víc než variabilní část účtu
+      cumVal += yearSave;
+      cum.push(Math.round(cumVal));
+      if(Y===1) first = yearSave;
     });
 
     drawChart(yrs.map(y=>y+" r."), cum);
@@ -408,6 +371,3 @@ main();
 
 </body>
 </html>
-
-
-
