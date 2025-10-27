@@ -54,13 +54,11 @@
       </div>
     </div>
 
-    <div id="cfgWarn" class="warn">Nepodařilo se načíst /config/config.json – používám výchozí ceník ve stránce.</div>
+    <div id="cfgWarn" class="warn">Nepodařilo se načíst config/config.json – používám výchozí ceník ve stránce.</div>
 
     <div style="margin-top:10px">
       <span class="pill">Zvolte režim podpory</span>
-      <div class="subsidy-wrap" id="subsidyWrap">
-        <!-- naplní se dynamicky z /config/config.json -->
-      </div>
+      <div class="subsidy-wrap" id="subsidyWrap"></div>
       <label class="switch"><input id="wb" type="checkbox"> <span>Přidat wallbox</span></label>
     </div>
 
@@ -110,6 +108,10 @@
             <input id="buyPrice" type="number" step="0.01" value="1.00">
           </div>
         </div>
+        <label class="switch" style="margin-top:8px">
+          <input id="hasExport" type="checkbox" checked>
+          <span>Mám sjednaný výkup (přetoky)</span>
+        </label>
         <p class="note" style="margin-top:8px">
           Sezónní model s degradací panelů a vlastní spotřebou dle administrace.
         </p>
@@ -122,10 +124,10 @@
 <script>
 let CONFIG=null;
 
-// 1) načtení configu (unit ceny, grants, model)
+// 1) načtení configu (unit ceny, grants, model) – RELATIVNÍ cesta kvůli GitHub Pages
 async function loadConfig(){
   try{
-    const r = await fetch('/config/config.json',{cache:'no-store'});
+    const r = await fetch('config/config.json',{cache:'no-store'});
     if(r.ok){ CONFIG = await r.json(); }
     else { document.getElementById('cfgWarn').style.display='block'; }
   }catch(e){
@@ -152,7 +154,6 @@ function getModel(){
     defaultBuyPrice: 1.00
   };
   if(!CONFIG || !CONFIG.model) return def;
-  // normalizace podílů (pro jistotu)
   const m = {...def, ...CONFIG.model};
   const s = m.seasonShares;
   const sum = (s.zima||0)+(s.jaro||0)+(s.leto||0)+(s.podzim||0);
@@ -191,27 +192,35 @@ function drawChart(labels, series){
   chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[{label:'Kumulovaný cashflow (Kč)', data:series}] }, options:{ responsive:true, scales:{y:{ticks:{callback:(v)=>v.toLocaleString('cs-CZ')+' Kč'}}} } });
 }
 
-// 3) sezónní úspora z adminu (shares + SC + degradace)
-function seasonalSaving(prodYear, avgPrice, buyPrice, yearIdx){
+/**
+ * Sezónní úspora:
+ * - vlastní spotřeba je po sezónách limitována podílem reálné roční spotřeby (cons * seasonShare)
+ * - přetoky dávají příjem jen pokud má klient sjednaný výkup
+ * - degradace panelů v čase
+ */
+function seasonalSaving(prodYear, consYear, avgPrice, buyPrice, hasExport, yearIdx){
   const M = getModel();
   const seasons = [
     {key:'zima',  share: M.seasonShares.zima,  sc: M.selfConsumption.zima},
     {key:'jaro',  share: M.seasonShares.jaro,  sc: M.selfConsumption.jaro},
-    {key:'leto',  share: M.seasonShares.leto,  sc: M.selfConsumption.leto},
+    {key:'leto',  share: M.selfConsumption.leto?M.seasonShares.leto:0,  sc: M.selfConsumption.leto},
     {key:'podzim',share: M.seasonShares.podzim,sc: M.selfConsumption.podzim},
   ];
   const deg = Math.pow(1 - (M.panelDegradation||0), yearIdx);
   let total=0;
+
   for (const s of seasons){
-    const prod = prodYear * s.share * deg;
-    const self = prod * s.sc;
+    const prod    = prodYear * s.share * deg;           // výroba v dané sezóně
+    const selfRaw = prod * s.sc;                         // „teoretická“ vlastní spotřeba
+    const consCap = Math.max(0, consYear * s.share);     // kolik dává smysl pokrýt ze SPOTŘEBY v sezóně
+    const self    = Math.min(selfRaw, consCap);          // NIKDY víc než reálná spotřeba v sezóně
     const exportE = Math.max(0, prod - self);
-    total += self*avgPrice + exportE*buyPrice;
+    const exportIncome = hasExport ? (exportE * buyPrice) : 0;
+    total += self*avgPrice + exportIncome;
   }
   return total;
 }
 
-// 4) dynamické načtení dotací do #subsidyWrap
 function hydrateGrants(){
   const wrap = document.getElementById('subsidyWrap');
   if(!wrap) return;
@@ -223,7 +232,6 @@ function hydrateGrants(){
         {name:'Dotace bez chytrého řízení', amount:100000},
       ];
 
-  // doplň „Bez dotace“
   if (!grants.some(g => Number(g.amount||0)===0)){
     grants.push({name:'Nechci čerpat dotaci', amount:0});
   }
@@ -251,9 +259,12 @@ async function main(){
   hydrateGrants();
 
   const q=new URLSearchParams(location.search);
-  const cons=parseNum(q.get('cons')),paid=parseNum(q.get('paid')),kwp=parseNum(q.get('kWp')),batt=parseNum(q.get('batt')),yieldK=q.get('yield')||"1150",wbQS=(q.get('wb')==="1");
-  const avgPrice=paid/cons;
-  document.getElementById("avgPrice").textContent=isFinite(avgPrice)?avgPrice.toFixed(2)+" Kč/kWh":"—";
+  const cons=parseNum(q.get('cons')), paid=parseNum(q.get('paid')),
+        kwp=parseNum(q.get('kWp')), batt=parseNum(q.get('batt')),
+        yieldK=q.get('yield')||"1150", wbQS=(q.get('wb')==="1");
+
+  const avgPrice = (cons>0 && paid>0) ? (paid/cons) : 0;
+  document.getElementById("avgPrice").textContent = (avgPrice>0 && isFinite(avgPrice)) ? avgPrice.toFixed(2)+" Kč/kWh" : "—";
   document.getElementById("config").textContent=`${kwp.toFixed(1)} kWp + ${batt.toFixed(2)} kWh`;
 
   const basePrice=internalPriceDynamic(kwp,batt);
@@ -264,10 +275,10 @@ async function main(){
   const annualProd=kwp*parseFloat(yieldK);
   document.getElementById("annualProd").textContent=fmt(Math.round(annualProd))+" kWh/rok";
 
-  const buyEl=document.getElementById("buyPrice"),wbEl=document.getElementById("wb");
+  const buyEl=document.getElementById("buyPrice"), wbEl=document.getElementById("wb");
+  const hasExportEl=document.getElementById("hasExport");
   wbEl.checked=wbQS;
 
-  // výchozí výkupní cena z adminu
   const M = getModel();
   if (typeof M.defaultBuyPrice === 'number') {
     buyEl.value = Number(M.defaultBuyPrice).toFixed(2);
@@ -284,8 +295,7 @@ async function main(){
       return Math.min(raw,cap);
     }
 
-    // výběr kartičky
-    cards.forEach((c,idx)=>{
+    cards.forEach((c)=>{
       c.addEventListener("click",()=>{ 
         capRadios.forEach(r=>r.checked=false);
         const inp=c.querySelector('input'); if(inp) inp.checked=true;
@@ -295,10 +305,8 @@ async function main(){
       c.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); c.click(); } });
     });
 
-    // expose
     window._grantAmount = grantAmount;
 
-    // default: první možnost
     if (capRadios[0]){ capRadios[0].checked = true; cards[0].classList.add('active'); }
   }
 
@@ -315,14 +323,20 @@ async function main(){
 
     const yrs=[...Array(20)].map((_,i)=>i+1);
     const buy=parseNum(buyEl.value||'1');
+    const hasExport = hasExportEl.checked;
     const cum=[];
     let cumVal=-post, first=0;
+
+    const cap = (paid>0 && isFinite(paid)) ? paid : Infinity; // robustní strop
+
     yrs.forEach((Y,idx)=>{
-      const yearSave = seasonalSaving(annualProd, avgPrice, buy, idx);
+      const yearSaveRaw = seasonalSaving(annualProd, cons, avgPrice, buy, hasExport, idx);
+      const yearSave = Math.min(yearSaveRaw, cap);
       cumVal += yearSave;
       cum.push(Math.round(cumVal));
       if(Y===1) first = yearSave;
     });
+
     drawChart(yrs.map(y=>y+" r."), cum);
     document.getElementById("yrSave").textContent=fmt(Math.round(first))+" Kč";
 
@@ -337,14 +351,13 @@ async function main(){
       document.getElementById("payback").innerHTML = `<span class="years">—</span>`;
     }
 
-    // dole záměrně nic nevypisujeme (nechceme prozrazovat ceník)
     document.getElementById("explain").textContent = "";
   }
 
-  // navěsit handlery a první výpočet
   bindGrantCards();
-  buyEl.addEventListener("input",recompute);
-  wbEl.addEventListener("change",recompute);
+  document.getElementById("buyPrice").addEventListener("input",recompute);
+  document.getElementById("wb").addEventListener("change",recompute);
+  document.getElementById("hasExport").addEventListener("change",recompute);
   recompute();
 }
 main();
@@ -352,3 +365,4 @@ main();
 
 </body>
 </html>
+
