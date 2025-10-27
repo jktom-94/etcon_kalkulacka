@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Krok 2 – Vstupy pro RD</title>
+  <style>
+    :root{--bg:#0b1220;--card:#0f172a;--ink:#e5e7eb;--mut:#94a3b8;--pri:#38bdf8;--line:rgba(148,163,184,.25)}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0b1220 40%,#0c1324);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    .wrap{max-width:980px;margin:0 auto;padding:24px}
+    .title{font-weight:800;font-size:clamp(20px,2.6vw,28px);letter-spacing:.3px;margin:0 0 8px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 6px 20px rgba(2,6,23,.4)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    @media (max-width:720px){.grid{grid-template-columns:1fr}}
+    label{display:block;font-size:14px;color:var(--mut);margin-bottom:6px}
+    input,select{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#0b1020;color:var(--ink);font-size:16px;outline:none}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .option-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+    @media (max-width:800px){.option-cards{grid-template-columns:1fr}}
+    .opt{border:1px solid var(--line);border-radius:14px;padding:14px;background:#0b1020;cursor:pointer;position:relative}
+    .opt.active{outline:3px solid rgba(56,189,248,.35);border-color:#54c4ff}
+    .opt h3{margin:0 0 6px;font-size:17px}
+    .opt .mut{font-size:13px;color:var(--mut)}
+    .hidden{display:none}
+    .btn{display:inline-block;background:var(--pri);color:#05243a;border:none;border-radius:12px;padding:12px 16px;font-weight:800;cursor:pointer}
+    .mut{color:var(--mut);font-size:13px}
+    .slider-row{margin-top:8px}
+    .slider{width:100%}
+    .val{font-weight:800}
+    .hint{font-size:12px;color:var(--mut);margin-top:4px}
+    .switch{display:flex;align-items:center;gap:10px;margin-top:10px}
+    .switch input{width:18px;height:18px;accent-color:#38bdf8}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">Vstupy – Rodinný dům</h1>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label>Roční spotřeba (kWh)</label>
+          <input id="cons" type="number" inputmode="decimal" min="0" step="1" placeholder="např. 5000">
+        </div>
+        <div>
+          <label>Roční platba za elektřinu (Kč)</label>
+          <input id="paid" type="number" inputmode="decimal" min="0" step="1" placeholder="např. 30000">
+        </div>
+      </div>
+
+      <div class="switch">
+        <input id="wb" type="checkbox">
+        <label for="wb">Mám / plánuji wallbox (nabíjecí stanici)</label>
+      </div>
+
+      <div class="option-cards">
+        <div id="optAuto" class="opt active" tabindex="0" role="button" aria-pressed="true">
+          <h3>Nechám si doporučit</h3>
+          <div class="mut">Na základě spotřeby a platby navrhneme výkon FVE a kapacitu baterie (zohledníme i wallbox).</div>
+          <div class="hint" id="autoPreview"></div>
+        </div>
+        <div id="optManual" class="opt" tabindex="0" role="button" aria-pressed="false">
+          <h3>Chci si vybrat sám</h3>
+          <div class="mut">Zvolíš posuvníky – výkon (2–10 kWp) a kapacitu (7,10–21,30 kWh).</div>
+          <div id="manualFields" class="hidden">
+            <div class="slider-row">
+              <label>Výkon FVE: <span class="val" id="kWpVal">2.0</span> kWp</label>
+              <input id="kWp" class="slider" type="range" min="2.0" max="10.0" step="0.5" value="2.0">
+            </div>
+            <div class="slider-row">
+              <label>Kapacita baterie: <span class="val" id="battVal">7.10</span> kWh</label>
+              <input id="battIdx" class="slider" type="range" min="0" max="4" step="1" value="0">
+              <div class="hint">Dostupné kapacity: 7,10 · 10,65 · 14,20 · 17,75 · 21,30 kWh</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:16px">
+        <button class="btn" id="go">Vyhodnotit</button>
+      </div>
+      <div class="mut" style="margin-top:8px">
+        Pozn.: Na další stránce uvidíš cenu systému, volbu režimu dotace (bez / 100k / 140k),
+        cenu po dotaci a návratnost. Wallbox ovlivní cenu systému (+25&nbsp;000 Kč vč. DPH) i výpočet dotace (+10&nbsp;000 Kč),
+        s respektem k limitu 100/140 tis. Kč.
+      </div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id)=>document.getElementById(id);
+  const battOptions = [7.10, 10.65, 14.20, 17.75, 21.30];
+
+  function recommend(consKWh, hasWB){
+    // výkon ~ spotřeba (kWh)/1000, zaokrouhleno na 0,5 kWp, max 10 kWp, min 2 kWp
+    let kwp = Math.min(10, Math.max(2, Math.round((consKWh/1000)*2)/2));
+    // pokud wallbox, přidej 1.5 kWp (limit 10)
+    if(hasWB) kwp = Math.min(10, kwp + 1.5);
+
+    // baterie dle spotřeby
+    const mwh = consKWh/1000;
+    let batt = 7.10;
+    if(mwh > 5 && mwh <= 8) batt = 10.65;
+    else if(mwh > 8 && mwh <= 12) batt = 14.20;
+    else if(mwh > 12 && mwh <= 16) batt = 17.75;
+    else if(mwh > 16) batt = 21.30;
+
+    return {kwp: parseFloat(kwp.toFixed(1)), batt: batt};
+  }
+
+  function updateAutoPreview(){
+    const cons = parseFloat(($('cons').value||'0').replace(',','.'));
+    const wb = $('wb').checked;
+    const r = recommend(isFinite(cons)?cons:0, wb);
+    $('autoPreview').textContent = (r.kwp>0) ? `Návrh: ${r.kwp.toFixed(1)} kWp + ${r.batt.toFixed(2)} kWh` : '';
+  }
+
+  function setActive(opt){
+    const a = $('optAuto'), m = $('optManual'), mf = $('manualFields');
+    if(opt==='auto'){
+      a.classList.add('active'); a.setAttribute('aria-pressed','true');
+      m.classList.remove('active'); m.setAttribute('aria-pressed','false');
+      mf.classList.add('hidden');
+    }else{
+      m.classList.add('active'); m.setAttribute('aria-pressed','true');
+      a.classList.remove('active'); a.setAttribute('aria-pressed','false');
+      mf.classList.remove('hidden');
+    }
+  }
+
+  $('optAuto').addEventListener('click', ()=> setActive('auto'));
+  $('optManual').addEventListener('click', ()=> setActive('manual'));
+  $('cons').addEventListener('input', updateAutoPreview);
+  $('wb').addEventListener('change', updateAutoPreview);
+
+  const battIdx = $('battIdx');
+  const kWpRange = $('kWp');
+  battIdx.addEventListener('input', ()=> $('battVal').textContent = battOptions[battIdx.value].toFixed(2));
+  kWpRange.addEventListener('input', ()=> $('kWpVal').textContent = parseFloat(kWpRange.value).toFixed(1));
+
+  // init
+  $('battVal').textContent = battOptions[battIdx.value].toFixed(2);
+  $('kWpVal').textContent = parseFloat(kWpRange.value).toFixed(1);
+
+  function go(){
+    const cons = parseFloat(($('cons').value||'0').replace(',','.'));
+    const paid = parseFloat(($('paid').value||'0').replace(',','.'));
+    const wb = $('wb').checked;
+
+    let kwp, batt;
+    if($('optAuto').classList.contains('active')){
+      const r = recommend(isFinite(cons)?cons:0, wb);
+      kwp = r.kwp; batt = r.batt;
+    }else{
+      kwp = parseFloat(kWpRange.value);
+      batt = battOptions[parseInt(battIdx.value,10)];
+    }
+
+    const params = new URLSearchParams();
+    params.set('cons', isFinite(cons)?cons:0);
+    params.set('paid', isFinite(paid)?paid:0);
+    params.set('kWp', kwp.toFixed(1));
+    params.set('batt', batt.toFixed(2));
+    params.set('yield', '1150'); // výchozí
+    params.set('wb', wb ? '1' : '0');
+
+    location.href = 'price_result_v7.html?' + params.toString();
+  }
+
+  document.getElementById('go').addEventListener('click', go);
+  updateAutoPreview();
+</script>
+</body>
+</html>

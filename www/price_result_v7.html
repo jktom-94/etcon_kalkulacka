@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cena a návratnost – Rodinný dům</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0b1020; --card:#111830; --ink:#e8eefc; --muted:#b7c3e0; --accent:#5ea1ff; --ok:#27c498; --line:#1d274a; --focus:#7ec3ff; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+  .wrap{max-width:1100px;margin:28px auto;padding:0 16px}
+  h1{font-size:1.8rem;margin:0 0 8px;font-weight:800}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}
+  .price-big{font-size:2rem;font-weight:800}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .pill{padding:6px 10px;border-radius:999px;background:#0c2548;color:#cfe2ff;border:1px solid #1e3666;display:inline-block;margin-bottom:10px}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+  input{width:100%;background:#0d1430;border:1px solid #1f2a4d;border-radius:10px;color:var(--ink);padding:10px;font-size:0.95rem}
+  .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .kpi .box{background:#0e1533;border:1px solid #20305c;border-radius:12px;padding:10px}
+  .kpi .val{font-size:1.2rem;font-weight:800}
+  .note{font-size:.9rem;color:#a9b8db}
+  .subsidy-wrap{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:10px}
+  @media(max-width:1024px){.subsidy-wrap{grid-template-columns:1fr}}
+  .sub-card{position:relative;border:1px solid #223455;background:#0e1530;border-radius:14px;padding:14px 14px;cursor:pointer;transition:transform .1s, box-shadow .1s, border-color .1s;min-height:84px;word-break:break-word;display:flex;flex-direction:column;gap:6px}
+  .sub-card .title{font-weight:800;font-size:1.05rem;line-height:1.2}
+  .sub-card .desc{color:#a9b8db;font-size:.95rem}
+  .sub-card .badge{align-self:flex-end;margin-top:6px;background:#0a2a54;border:1px solid #2d66c7;color:#cfe2ff;padding:.2rem .5rem;border-radius:999px;font-size:.8rem;white-space:nowrap}
+  .sub-card input{position:absolute;opacity:0;pointer-events:none}
+  .sub-card.active{border-color:var(--focus);box-shadow:0 0 0 3px rgba(126,195,255,.18);transform:translateY(-1px)}
+  .switch{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .switch input{width:20px;height:20px;accent-color:#6ec1ff}
+  .payback .years{font-size:1.4rem;font-weight:800}
+  .payback .months{font-size:1.0rem;opacity:.9;margin-left:6px}
+  .warn{background:#2b1e00;border:1px solid #6b4a00;color:#ffd88a;padding:8px 10px;border-radius:10px;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>Cena a návratnost – doporučená sestava</h1>
+  <section class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-end">
+      <div>
+        <div class="muted">Doporučený výkon a baterie</div>
+        <div style="font-size:1.2rem;font-weight:800" id="config">—</div>
+      </div>
+      <div>
+        <div class="muted">Cena před dotací</div>
+        <div class="price-big" id="pricePre">— Kč</div>
+      </div>
+    </div>
+
+    <div id="cfgWarn" class="warn">Nepodařilo se načíst /config/config.json – používám výchozí ceník ve stránce.</div>
+
+    <div style="margin-top:10px">
+      <span class="pill">Zvolte režim podpory</span>
+      <div class="subsidy-wrap" id="subsidyWrap">
+        <!-- naplní se dynamicky z /config/config.json -->
+      </div>
+      <label class="switch"><input id="wb" type="checkbox"> <span>Přidat wallbox</span></label>
+    </div>
+
+    <div class="row" style="margin-top:8px;align-items:flex-end;gap:24px">
+      <div>
+        <div class="muted">Vyčíslená dotace</div>
+        <div style="font-size:1.6rem;font-weight:800" id="grantVal">— Kč</div>
+        <div class="muted" style="font-size:.9rem" id="grantRule">10 000 × (kWp + kWh), omezeno stropem</div>
+      </div>
+      <div>
+        <div class="muted">Cena po dotaci</div>
+        <div style="font-size:1.6rem;font-weight:800" id="pricePost">— Kč</div>
+      </div>
+      <div>
+        <div class="muted">Návratnost (odhad)</div>
+        <div class="payback" id="payback"><span class="years">—</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="grid">
+      <div>
+        <h3>Graf kumulovaného cashflow</h3>
+        <canvas id="cf"></canvas>
+      </div>
+      <div>
+        <h3>Data a předpoklady výpočtu</h3>
+        <div class="kpi">
+          <div class="box">
+            <div class="muted">Průměrná cena elektřiny</div>
+            <div class="val" id="avgPrice">— Kč/kWh</div>
+          </div>
+          <div class="box">
+            <div class="muted">Roční výroba FVE</div>
+            <div class="val" id="annualProd">— kWh/rok</div>
+          </div>
+          <div class="box">
+            <div class="muted">Úspora v 1. roce</div>
+            <div class="val" id="yrSave">— Kč</div>
+          </div>
+        </div>
+        <hr style="border-color:#1b2647">
+        <div class="grid">
+          <div>
+            <label>Výkupní cena přetoků (Kč/kWh)</label>
+            <input id="buyPrice" type="number" step="0.01" value="1.00">
+          </div>
+        </div>
+        <p class="note" style="margin-top:8px">
+          Sezónní model s degradací panelů a vlastní spotřebou dle administrace.
+        </p>
+      </div>
+    </div>
+    <div class="muted" id="explain"></div>
+  </section>
+</main>
+
+<script>
+let CONFIG=null;
+
+// 1) načtení configu (unit ceny, grants, model)
+async function loadConfig(){
+  try{
+    const r = await fetch('/config/config.json',{cache:'no-store'});
+    if(r.ok){ CONFIG = await r.json(); }
+    else { document.getElementById('cfgWarn').style.display='block'; }
+  }catch(e){
+    document.getElementById('cfgWarn').style.display='block';
+  }
+}
+
+// 2) defaults + merge
+function getUnit(){
+  const def={
+    panel:1800,rack:850,laborPerPanel:1100,inverter:25000,bms:8500,acdc:17000,rev:15000,stop:2500,misc:10000,
+    disconnector:800,batModule:14000,marginPct:38,vatPct:12,electricianHour:600,electricianHours:38,
+    wallboxAddPrice:25000, wallboxGrant:10000, batModuleKWh:3.55, panelWp:500
+  };
+  if(!CONFIG || !CONFIG.unit) return def;
+  return {...def, ...CONFIG.unit};
+}
+
+function getModel(){
+  const def = {
+    seasonShares: {zima:0.10,jaro:0.25,leto:0.45,podzim:0.20},
+    selfConsumption: {zima:0.95,jaro:0.75,leto:0.55,podzim:0.70},
+    panelDegradation: 0.004,
+    defaultBuyPrice: 1.00
+  };
+  if(!CONFIG || !CONFIG.model) return def;
+  // normalizace podílů (pro jistotu)
+  const m = {...def, ...CONFIG.model};
+  const s = m.seasonShares;
+  const sum = (s.zima||0)+(s.jaro||0)+(s.leto||0)+(s.podzim||0);
+  if (sum>0){
+    m.seasonShares = {
+      zima:(s.zima||0)/sum,
+      jaro:(s.jaro||0)/sum,
+      leto:(s.leto||0)/sum,
+      podzim:(s.podzim||0)/sum
+    };
+  }
+  return m;
+}
+
+function fmt(x){ return (x||0).toLocaleString('cs-CZ'); }
+function parseNum(q){ const v=parseFloat(q); return isNaN(v)?0:v; }
+
+function internalPriceDynamic(kwp,batt_kwh){
+  const U=getUnit();
+  const panels=Math.ceil(kwp/(U.panelWp/1000));
+  const disc=Math.ceil(panels/2);
+  const batModules=Math.ceil(batt_kwh/U.batModuleKWh);
+  const base=panels*(U.panel+U.rack+U.laborPerPanel)+disc*U.disconnector+U.inverter+U.bms+U.acdc+U.rev+U.stop+U.misc+batModules*U.batModule+U.electricianHours*U.electricianHour;
+  const withMargin=base*(1+U.marginPct/100);
+  return Math.round(withMargin*(1+U.vatPct/100));
+}
+
+/* české skloňování */
+function czYears(n){n=Math.floor(n);const m10=n%10,m100=n%100;if(n===1)return"1 rok";if(m10>=2&&m10<=4&&!(m100>=12&&m100<=14))return n+" roky";return n+" let";}
+function czMonths(n){n=Math.floor(n);const m10=n%10,m100=n%100;if(n===1)return"1 měsíc";if(m10>=2&&m10<=4&&!(m100>=12&&m100<=14))return n+" měsíce";return n+" měsíců";}
+
+let chart;
+function drawChart(labels, series){
+  const ctx = document.getElementById('cf').getContext('2d');
+  if(chart) chart.destroy();
+  chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[{label:'Kumulovaný cashflow (Kč)', data:series}] }, options:{ responsive:true, scales:{y:{ticks:{callback:(v)=>v.toLocaleString('cs-CZ')+' Kč'}}} } });
+}
+
+// 3) sezónní úspora z adminu (shares + SC + degradace)
+function seasonalSaving(prodYear, avgPrice, buyPrice, yearIdx){
+  const M = getModel();
+  const seasons = [
+    {key:'zima',  share: M.seasonShares.zima,  sc: M.selfConsumption.zima},
+    {key:'jaro',  share: M.seasonShares.jaro,  sc: M.selfConsumption.jaro},
+    {key:'leto',  share: M.seasonShares.leto,  sc: M.selfConsumption.leto},
+    {key:'podzim',share: M.seasonShares.podzim,sc: M.selfConsumption.podzim},
+  ];
+  const deg = Math.pow(1 - (M.panelDegradation||0), yearIdx);
+  let total=0;
+  for (const s of seasons){
+    const prod = prodYear * s.share * deg;
+    const self = prod * s.sc;
+    const exportE = Math.max(0, prod - self);
+    total += self*avgPrice + exportE*buyPrice;
+  }
+  return total;
+}
+
+// 4) dynamické načtení dotací do #subsidyWrap
+function hydrateGrants(){
+  const wrap = document.getElementById('subsidyWrap');
+  if(!wrap) return;
+
+  const grants = (CONFIG && Array.isArray(CONFIG.grants) && CONFIG.grants.length)
+    ? CONFIG.grants.slice()
+    : [
+        {name:'Dotace s chytrým řízením', amount:140000},
+        {name:'Dotace bez chytrého řízení', amount:100000},
+      ];
+
+  // doplň „Bez dotace“
+  if (!grants.some(g => Number(g.amount||0)===0)){
+    grants.push({name:'Nechci čerpat dotaci', amount:0});
+  }
+
+  wrap.innerHTML = '';
+  grants.forEach(g=>{
+    const cap = Number(g.amount||0);
+    const lab = document.createElement('label');
+    lab.className = 'sub-card';
+    lab.dataset.cap = String(cap);
+    lab.tabIndex = 0;
+    lab.setAttribute('role','button');
+    lab.innerHTML = `
+      <input type="radio" name="cap" value="${cap}">
+      <div class="title">${g.name}</div>
+      <div class="desc">${cap>0?`Strop podpory ${fmt(cap)} Kč.`:'Bez uplatnění podpory.'}</div>
+      <span class="badge">${fmt(cap)} Kč</span>
+    `;
+    wrap.appendChild(lab);
+  });
+}
+
+async function main(){
+  await loadConfig();
+  hydrateGrants();
+
+  const q=new URLSearchParams(location.search);
+  const cons=parseNum(q.get('cons')),paid=parseNum(q.get('paid')),kwp=parseNum(q.get('kWp')),batt=parseNum(q.get('batt')),yieldK=q.get('yield')||"1150",wbQS=(q.get('wb')==="1");
+  const avgPrice=paid/cons;
+  document.getElementById("avgPrice").textContent=isFinite(avgPrice)?avgPrice.toFixed(2)+" Kč/kWh":"—";
+  document.getElementById("config").textContent=`${kwp.toFixed(1)} kWp + ${batt.toFixed(2)} kWh`;
+
+  const basePrice=internalPriceDynamic(kwp,batt);
+  const U=getUnit();
+  let pricePre=basePrice+(wbQS?U.wallboxAddPrice:0);
+  document.getElementById("pricePre").textContent=fmt(pricePre)+" Kč";
+
+  const annualProd=kwp*parseFloat(yieldK);
+  document.getElementById("annualProd").textContent=fmt(Math.round(annualProd))+" kWh/rok";
+
+  const buyEl=document.getElementById("buyPrice"),wbEl=document.getElementById("wb");
+  wbEl.checked=wbQS;
+
+  // výchozí výkupní cena z adminu
+  const M = getModel();
+  if (typeof M.defaultBuyPrice === 'number') {
+    buyEl.value = Number(M.defaultBuyPrice).toFixed(2);
+  }
+
+  function bindGrantCards(){
+    const cards=[...document.querySelectorAll(".sub-card")];
+    const capRadios=[...document.querySelectorAll("input[name=cap]")];
+
+    function grantAmount(){
+      const chk = capRadios.find(r=>r.checked);
+      const cap = chk ? Number(chk.value||0) : 0;
+      const raw=10000*(kwp+batt)+(wbEl.checked?U.wallboxGrant:0);
+      return Math.min(raw,cap);
+    }
+
+    // výběr kartičky
+    cards.forEach((c,idx)=>{
+      c.addEventListener("click",()=>{ 
+        capRadios.forEach(r=>r.checked=false);
+        const inp=c.querySelector('input'); if(inp) inp.checked=true;
+        cards.forEach(k=>k.classList.toggle('active',k===c));
+        recompute();
+      });
+      c.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); c.click(); } });
+    });
+
+    // expose
+    window._grantAmount = grantAmount;
+
+    // default: první možnost
+    if (capRadios[0]){ capRadios[0].checked = true; cards[0].classList.add('active'); }
+  }
+
+  function recompute(){
+    const U=getUnit();
+    pricePre=basePrice+(wbEl.checked?U.wallboxAddPrice:0);
+    document.getElementById("pricePre").textContent=fmt(pricePre)+" Kč";
+
+    const grant=(typeof window._grantAmount==='function')?window._grantAmount():0;
+    document.getElementById("grantVal").textContent=fmt(grant)+" Kč";
+
+    const post=Math.max(0,pricePre-grant);
+    document.getElementById("pricePost").textContent=fmt(post)+" Kč";
+
+    const yrs=[...Array(20)].map((_,i)=>i+1);
+    const buy=parseNum(buyEl.value||'1');
+    const cum=[];
+    let cumVal=-post, first=0;
+    yrs.forEach((Y,idx)=>{
+      const yearSave = seasonalSaving(annualProd, avgPrice, buy, idx);
+      cumVal += yearSave;
+      cum.push(Math.round(cumVal));
+      if(Y===1) first = yearSave;
+    });
+    drawChart(yrs.map(y=>y+" r."), cum);
+    document.getElementById("yrSave").textContent=fmt(Math.round(first))+" Kč";
+
+    const monthsPB = first>0 ? Math.ceil((post/first)*12) : null;
+    if(monthsPB){
+      const y = Math.floor(monthsPB/12);
+      const m = monthsPB%12;
+      const yTxt = czYears(y);
+      const mTxt = m>0 ? ` <span class="months">a ${czMonths(m)}</span>` : "";
+      document.getElementById("payback").innerHTML = `<span class="years">${yTxt}</span>${mTxt}`;
+    }else{
+      document.getElementById("payback").innerHTML = `<span class="years">—</span>`;
+    }
+
+    // dole záměrně nic nevypisujeme (nechceme prozrazovat ceník)
+    document.getElementById("explain").textContent = "";
+  }
+
+  // navěsit handlery a první výpočet
+  bindGrantCards();
+  buyEl.addEventListener("input",recompute);
+  wbEl.addEventListener("change",recompute);
+  recompute();
+}
+main();
+</script>
+
+</body>
+</html>

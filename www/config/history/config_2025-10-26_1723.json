@@ -1,0 +1,29 @@
+{
+    "unit": {
+        "panel": 1800,
+        "rack": 850,
+        "laborPerPanel": 1100,
+        "disconnector": 800,
+        "inverter": 25000,
+        "bms": 8500,
+        "acdc": 17000,
+        "rev": 15000,
+        "stop": 2500,
+        "misc": 10000,
+        "batModule": 14000,
+        "electricianHour": 600,
+        "electricianHours": 38,
+        "marginPct": 38,
+        "vatPct": 12,
+        "wallboxAddPrice": 25000,
+        "wallboxGrant": 10000,
+        "batModuleKWh": 3.55,
+        "panelWp": 500
+    },
+    "grants": [
+        {
+            "name": "",
+            "amount": 0
+        }
+    ]
+}
